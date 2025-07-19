@@ -2,10 +2,12 @@ from gpiozero import Button
 from signal import pause
 from pathlib import Path
 import os
+import re
 import time
 import queue
 import sounddevice as sd
 import wave
+import json
 from vosk import Model, KaldiRecognizer
 from modules.llm_handler import LLMHandler
 from piper_tts import synthesize_to_file
@@ -19,29 +21,37 @@ MODEL_PATH = "./models/vosk-model-small-en-us-0.15"
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 8000
 
+# === Instantiate once ===
+print("🧠 Initializing models…")
+vosk_model = Model(MODEL_PATH)
+llm = LLMHandler(provider="ollama", model="gemma3:1b")
+
+conversation = [
+    {"role": "system", "content": "You are a helpful AI assistant. Answer short and friendly."}
+]
+
 # === Helpers ===
 def speak(text: str, filename: str):
     path = TMP_AUDIO / filename
+    print("path: ", path)
     synthesize_to_file(text, path)
     print(f"🔊 {text}")
     os.system(f"aplay {path}")
     time.sleep(PAUSE)
 
 def transcribe_recording(wav_path: Path) -> str:
-    model = Model(MODEL_PATH)
-    rec = KaldiRecognizer(model, SAMPLE_RATE)
+    rec = KaldiRecognizer(vosk_model, SAMPLE_RATE)
     with wave.open(str(wav_path), "rb") as wf:
         while True:
             data = wf.readframes(4000)
             if len(data) == 0:
                 break
             rec.AcceptWaveform(data)
-    result = rec.FinalResult()
-    text = eval(result).get("text", "")
+    result = json.loads(rec.FinalResult())
+    text = result.get("text", "")
     print(f"📝 Transcribed: {text}")
     return text
 
-# === Recording Logic ===
 def record_while_button_held():
     q = queue.Queue()
     rec_file = TMP_AUDIO / "recording.wav"
@@ -60,7 +70,7 @@ def record_while_button_held():
     wf.setframerate(SAMPLE_RATE)
 
     stream.start()
-    print("🎙️ Recording... hold button to keep talking.")
+    print("🎙️ Recording… hold button to keep talking.")
     while button.is_pressed:
         data = q.get()
         wf.writeframes(data)
@@ -71,9 +81,64 @@ def record_while_button_held():
     print("🛑 Recording stopped.")
     return rec_file
 
+
+
+
+def stream_and_speak(conversation: list, llm, tmp_audio_dir: Path, prefix: str = "response", temperature: float = 0.7):
+    """
+    Streams LLM response and speaks it sentence-by-sentence as it comes in.
+
+    Args:
+        conversation (list): Current conversation list with system/user/assistant turns
+        llm (LLMHandler): Your LLM handler instance
+        tmp_audio_dir (Path): Directory to store temporary audio files
+        prefix (str): Prefix for audio filenames
+        temperature (float): LLM generation temperature
+    Returns:
+        str: Full response from the assistant
+    """
+    buffer = ""
+    sentence_id = 0
+    full_response_parts = []
+
+    sentence_end_pattern = re.compile(r"(.*?[\.!?])\s")  # full thought
+
+    print("🤖 Streaming response…")
+    for chunk in llm.stream(conversation, temperature=temperature):
+        content = chunk.get("content", "")
+        if not content:
+            continue
+        print(content, end="", flush=True)
+        buffer += content
+        full_response_parts.append(content)
+
+        # extract full sentences
+        while True:
+            match = sentence_end_pattern.match(buffer)
+            if not match:
+                break
+            sentence = match.group(1).strip()
+            buffer = buffer[len(match.group(0)):]  # remove spoken part
+            if sentence:
+                sentence_id += 1
+                filename = f"{prefix}_{sentence_id}.wav"
+                print("filename: ", filename)
+                print("tmp_audio_dir: ", tmp_audio_dir)
+                speak(sentence,filename)
+
+    # speak any leftover buffer
+    if buffer.strip():
+        sentence_id += 1
+        filename = f"{prefix}_{sentence_id}.wav"
+        speak(buffer.strip(),filename)
+
+    full_response = "".join(full_response_parts).strip()
+    return full_response
+
 # === Main Logic ===
+
 def on_button_pressed():
-    print("🎯 Button pressed. Listening...")
+    print("🎯 Button pressed. Listening…")
     audio = record_while_button_held()
     spoken_text = transcribe_recording(audio)
     print("🎯 spoken_text: ", spoken_text)
@@ -82,10 +147,11 @@ def on_button_pressed():
         speak("I didn’t catch anything. Please try again.", "no_input.wav")
         return
 
-    llm = LLMHandler(provider="ollama", model="gemma3:1b")
-    response = llm.call(spoken_text).strip()
-    print(f"🤖 Response: {response}")
-    speak(response, "response.wav")
+    conversation.append({"role": "user", "content": spoken_text})
+
+    response = stream_and_speak(conversation, llm, TMP_AUDIO)
+    conversation.append({"role": "assistant", "content": response})
+
 
 # === Setup ===
 button = Button(3, pull_up=True)
