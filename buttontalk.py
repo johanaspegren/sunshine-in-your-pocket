@@ -153,9 +153,65 @@ def on_button_pressed():
     conversation.append({"role": "assistant", "content": response})
 
 
-# === Setup ===
-button = Button(3, pull_up=True)
-button.when_pressed = on_button_pressed
+def handle_button_event():
+    q = queue.Queue()
+    rec_file = TMP_AUDIO / "recording.wav"
 
-print("📲 Hold the button to talk.")
-pause()
+    def callback(indata, frames, time, status):
+        q.put(bytes(indata))
+
+    stream = sd.RawInputStream(
+        samplerate=SAMPLE_RATE,
+        blocksize=BLOCK_SIZE,
+        dtype='int16',
+        channels=1,
+        callback=callback
+    )
+    wf = wave.open(str(rec_file), "wb")
+    wf.setnchannels(1)
+    wf.setsampwidth(2)
+    wf.setframerate(SAMPLE_RATE)
+
+    print("🎯 Button pressed. Starting recording immediately…")
+    stream.start()
+    start_time = time.time()
+
+    while button.is_pressed:
+        data = q.get()
+        wf.writeframes(data)
+
+    duration = time.time() - start_time
+    stream.stop()
+    stream.close()
+    wf.close()
+    print(f"🛑 Recording stopped. Duration: {duration:.2f}s")
+
+    if duration < 0.5:
+        speak("Hello! I'm ready when you are.", "welcome.wav")
+        return
+
+    spoken_text = transcribe_recording(rec_file)
+    print("🎯 spoken_text: ", spoken_text)
+
+    if not spoken_text:
+        speak("I didn’t catch anything. Please try again.", "no_input.wav")
+        return
+
+    conversation.append({"role": "user", "content": spoken_text})
+    response = stream_and_speak(conversation, llm, TMP_AUDIO)
+    conversation.append({"role": "assistant", "content": response})
+
+
+# === Setup ===
+def main():
+    speak("Hello! I'm online and ready to hang out", "online.wav")
+
+    button = Button(3, pull_up=True)
+
+    button.when_pressed = handle_button_event
+
+    print("📲 Tap or hold the button to talk.")
+    pause()
+
+if __name__ == "__main__":
+    main()
