@@ -205,13 +205,13 @@ def handle_button_event():
 # === Setup ===
 def main():
     speak("Hello! I'm online and ready to hang out", "online.wav")
-
-    button = Button(3, pull_up=True)
-
     button.when_pressed = handle_button_event
 
     print("📲 Tap or hold the button to talk.")
     pause()
+
+
+button = Button(3, pull_up=True)
 
 if __name__ == "__main__":
     main()
