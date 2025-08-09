@@ -1,4 +1,8 @@
+
 from gpiozero import Button
+from gpiozero.pins.lgpio import LGPIOFactory  # ← add this
+
+
 from signal import pause
 from pathlib import Path
 import os
@@ -211,7 +215,13 @@ def main():
     pause()
 
 
-button = Button(3, pull_up=True)
+# button = Button(3, pull_up=True)
+#pin_factory = PiGPIOFactory()  # uses the pigpiod daemon
+#button = Button(3, pull_up=True, pin_factory=pin_factory)
+pin_factory = LGPIOFactory()
+button = Button(3, pull_up=True, pin_factory=pin_factory)
+
+
 
 if __name__ == "__main__":
     main()
