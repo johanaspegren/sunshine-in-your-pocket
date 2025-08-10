@@ -6,6 +6,7 @@ from gpiozero.pins.lgpio import LGPIOFactory  # ← add this
 from signal import pause
 from pathlib import Path
 import os
+import shutil, subprocess
 import re
 import sys
 import time
@@ -47,11 +48,19 @@ conversation = [
 # === Helpers ===
 def speak(text: str, filename: str):
     path = TMP_AUDIO / filename
-    print("path: ", path)
     synthesize_to_file(text, path)
     print(f"🔊 {text}")
-    os.system(f"aplay {path}")
+    if shutil.which("paplay"):
+        cmd = ["paplay", str(path)]
+    else:
+        # fallback if no Pulse (not ideal on your setup)
+        dev = os.getenv("APLAY_DEVICE", "default")
+        cmd = ["aplay", "-q", "-D", dev, str(path)]
+    r = subprocess.run(cmd, capture_output=True, text=True)
+    if r.returncode != 0:
+        print("player rc:", r.returncode, r.stderr.strip())
     time.sleep(PAUSE)
+
 
 def transcribe_recording(wav_path: Path) -> str:
     rec = KaldiRecognizer(vosk_model, SAMPLE_RATE)
