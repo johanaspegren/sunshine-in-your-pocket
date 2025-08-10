@@ -7,6 +7,7 @@ from signal import pause
 from pathlib import Path
 import os
 import re
+import sys
 import time
 import queue
 import sounddevice as sd
@@ -16,14 +17,23 @@ from vosk import Model, KaldiRecognizer
 from modules.llm_handler import LLMHandler
 from piper_tts import synthesize_to_file
 
+# Project root = folder where THIS file lives
+PROJECT_ROOT = Path(__file__).resolve().parent
+sys.path.insert(0, str(PROJECT_ROOT))  # so "modules/..." imports work anywhere
+
 # === Settings ===
-TMP_AUDIO = Path("./tts_output")
-TMP_AUDIO.mkdir(exist_ok=True)
+TMP_AUDIO = (PROJECT_ROOT / "tts_output")
+TMP_AUDIO.mkdir(parents=True, exist_ok=True)
 PAUSE = 1
 
-MODEL_PATH = "./models/vosk-model-small-en-us-0.15"
+
+# === Settings ===
+
+MODEL_PATH = str(PROJECT_ROOT / "models" / "vosk-model-small-en-us-0.15")
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 8000
+
+
 
 # === Instantiate once ===
 print("🧠 Initializing models…")
