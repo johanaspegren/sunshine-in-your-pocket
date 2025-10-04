@@ -72,7 +72,9 @@ def init_models():
         vosk_model = Model(MODEL_PATH)
     if llm is None:
         logging.info("🤖 Initializing LLM handler...")
-        llm = LLMHandler(provider="ollama", model="gemma3:1b")
+        #llm = LLMHandler(provider="ollama", model="gemma3:1b")
+        display.write("LLM Init - openai")
+        llm = LLMHandler(provider="openai", model="gpt-4o-mini")
 
 
 def transcribe_recording(wav_path: Path) -> str:
