@@ -238,7 +238,7 @@ def main():
 #pin_factory = PiGPIOFactory()  # uses the pigpiod daemon
 #button = Button(3, pull_up=True, pin_factory=pin_factory)
 pin_factory = LGPIOFactory()
-button = Button(3, pull_up=True, pin_factory=pin_factory)
+button = Button(5, pull_up=True, pin_factory=pin_factory)
 
 
 
