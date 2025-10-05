@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Buttontalk Assistant — Refined Edition
---------------------------------------
+Buttontalk Assistant — Deluxe Edition
+-------------------------------------
 A voice-triggered local assistant using:
  - gpiozero (button on GPIO 5)
  - Vosk (speech-to-text)
  - Piper (speech synthesis)
- - Your LLMHandler for streaming responses
+ - OpenAI (streaming LLM)
+Now with: coloured logs + backlight pulse for "thinking"
 """
 
 from gpiozero import Button
@@ -17,35 +18,36 @@ from pathlib import Path
 import os, sys, time, wave, queue, re, json, subprocess, shutil, signal, logging
 import sounddevice as sd
 from vosk import Model, KaldiRecognizer
+from colorama import Fore, Style, init as color_init
 from piper_tts import synthesize_to_file
 from modules.llm_handler import LLMHandler
 from modules.display_handler import DisplayHandler
 
-
-# === Setup logging ===
+# === Setup ===
+color_init(autoreset=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
     datefmt="%H:%M:%S",
 )
 
-# === Paths ===
 PROJECT_ROOT = Path(__file__).resolve().parent
 TMP_AUDIO = PROJECT_ROOT / "tts_output"
 TMP_AUDIO.mkdir(parents=True, exist_ok=True)
-
 MODEL_PATH = str(PROJECT_ROOT / "models" / "vosk-model-small-en-us-0.15")
 SAMPLE_RATE = 16000
 BLOCK_SIZE = 8000
 PAUSE = 1.0
 
-# === Globals ===
 vosk_model = None
 llm = None
-conversation = [{"role": "system", "content": "You are a helpful AI assistant. Answer short and friendly."}]
-
+conversation = [{"role": "system", "content": "You are a helpful and witty AI assistant."}]
 
 # === Utility functions ===
+def print_banner(text, color=Fore.CYAN):
+    border = f"{color}{'═' * (len(text) + 4)}{Style.RESET_ALL}"
+    print(f"\n{border}\n{color}║ {text} ║{Style.RESET_ALL}\n{border}\n")
+
 def speak(text: str, filename: str):
     """Convert text to speech and play."""
     path = TMP_AUDIO / filename
@@ -58,27 +60,23 @@ def speak(text: str, filename: str):
         dev = os.getenv("APLAY_DEVICE", "default")
         cmd = ["aplay", "-q", "-D", dev, str(path)]
 
-    r = subprocess.run(cmd, capture_output=True, text=True)
-    if r.returncode != 0:
-        logging.warning(f"Audio playback error: {r.stderr.strip()}")
+    subprocess.run(cmd, capture_output=True, text=True)
     time.sleep(PAUSE)
 
 
 def init_models():
-    """Lazy-load heavy models."""
     global vosk_model, llm
     if vosk_model is None:
-        logging.info("🧠 Loading Vosk model...")
+        print_banner("🧠 Loading Vosk model...", Fore.YELLOW)
         vosk_model = Model(MODEL_PATH)
     if llm is None:
-        logging.info("🤖 Initializing LLM handler...")
-        #llm = LLMHandler(provider="ollama", model="gemma3:1b")
+        print_banner("🤖 Initialising LLM handler...", Fore.MAGENTA)
         display.write("LLM Init - openai")
         llm = LLMHandler(provider="openai", model="gpt-4o-mini")
+        display.write("Ready")
 
 
 def transcribe_recording(wav_path: Path) -> str:
-    """Transcribe recorded audio to text."""
     rec = KaldiRecognizer(vosk_model, SAMPLE_RATE)
     with wave.open(str(wav_path), "rb") as wf:
         while True:
@@ -93,8 +91,7 @@ def transcribe_recording(wav_path: Path) -> str:
     return text
 
 
-def record_audio_while_pressed(button: Button) -> Path:
-    """Record audio while button is held."""
+def record_audio_while_pressed(button: Button):
     q = queue.Queue()
     rec_file = TMP_AUDIO / "recording.wav"
 
@@ -111,14 +108,13 @@ def record_audio_while_pressed(button: Button) -> Path:
         wf.setnchannels(1)
         wf.setsampwidth(2)
         wf.setframerate(SAMPLE_RATE)
-
-        logging.info("🎙️ Recording… hold button to talk.")
+        print(Fore.CYAN + "🎙️ Recording… hold button to talk." + Style.RESET_ALL)
         start = time.time()
         while button.is_pressed:
             wf.writeframes(q.get())
 
     duration = time.time() - start
-    logging.info(f"🛑 Recording stopped ({duration:.2f}s)")
+    print(Fore.CYAN + f"🛑 Recording stopped ({duration:.2f}s)" + Style.RESET_ALL)
     return rec_file, duration
 
 
@@ -129,22 +125,36 @@ def stream_and_speak(conversation, llm, tmp_audio_dir, prefix="response", temper
     full_response_parts = []
     pattern = re.compile(r"(.*?[\.!?])\s")
 
-    logging.info("🤖 Streaming LLM response…")
+    print(Fore.MAGENTA + "\n🤔 Thinking..." + Style.RESET_ALL)
+    display.start_pulse(color=(0, 80, 255), speed=1.8)  # nice blue pulse
+
+    display_buffer = ""
     for chunk in llm.stream(conversation, temperature=temperature):
         content = chunk.get("content", "")
         if not content:
             continue
-        print(content, end="", flush=True)
+
+        # --- Terminal output ---
+        print(Fore.BLUE + content + Style.RESET_ALL, end="", flush=True)
+
+        # --- Update display in real time ---
+        display_buffer += content
+        # Keep only last 32 chars (2×16 LCD)
+        truncated = display_buffer[-32:]
+        display.write(truncated)
+
         buffer += content
         full_response_parts.append(content)
 
-        # Speak complete sentences
         while match := pattern.match(buffer):
             sentence = match.group(1).strip()
             buffer = buffer[len(match.group(0)) :]
             if sentence:
                 sentence_id += 1
                 speak(sentence, f"{prefix}_{sentence_id}.wav")
+
+    display.stop_pulse()  # stop pulsing when response done
+    print(Fore.GREEN + "\n✅ Response complete!\n" + Style.RESET_ALL)
 
     if buffer.strip():
         sentence_id += 1
@@ -154,7 +164,6 @@ def stream_and_speak(conversation, llm, tmp_audio_dir, prefix="response", temper
 
 
 def handle_button_event():
-    """Triggered when the button is pressed."""
     init_models()
     rec_file, duration = record_audio_while_pressed(button)
 
@@ -172,9 +181,9 @@ def handle_button_event():
     conversation.append({"role": "assistant", "content": response})
 
 
-# === Setup and cleanup ===
 def shutdown_handler(sig, frame):
-    logging.info("🧹 Shutting down gracefully…")
+    print_banner("🧹 Shutting down gracefully…", Fore.YELLOW)
+    display.off()
     try:
         speak("Goodbye!", "goodbye.wav")
     except Exception:
@@ -187,15 +196,16 @@ signal.signal(signal.SIGINT, shutdown_handler)
 
 
 def main():
-    logging.info("🚀 Starting Buttontalk Assistant")
+    print_banner("🚀 Starting Buttontalk Assistant", Fore.GREEN)
+    display.fade_in(color=(0, 100, 255))
     display.write("Hello")
     speak("Hello! I'm online and ready to hang out.", "online.wav")
     button.when_pressed = handle_button_event
-    logging.info("📲 Tap or hold the button to talk.")
+    print(Fore.CYAN + "📲 Tap or hold the button to talk.\n" + Style.RESET_ALL)
     pause()
 
 
-# === Initialize button on GPIO5 ===
+# === Hardware init ===
 pin_factory = LGPIOFactory()
 button = Button(5, pull_up=True, pin_factory=pin_factory)
 display = DisplayHandler()

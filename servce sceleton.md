@@ -1,15 +1,9 @@
-
-Make saure I2C is disabled, we use the same gpio3
-
-
-
 sudo nano /etc/systemd/system/buttontalk.service
 
 antipater@aristoteles:~/dev/personal-assistant $ sudo more /etc/systemd/system/buttontalk.service
 [Unit]
 Description=ButtonTalk voice button
 After=network.target sound.target
-# GPIO3 is used -> ensure I2C is disabled at boot (dtparam=i2c_arm=off)
 
 [Service]
 Type=simple
