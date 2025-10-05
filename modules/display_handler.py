@@ -4,6 +4,9 @@ import st7036
 import threading
 import time
 
+import threading, queue, time
+
+
 try:
     from modules.dothat import backlight
 except Exception as e:
@@ -24,6 +27,11 @@ class DisplayHandler:
         self._pulse_active = False
         self._pulse_color = (0, 0, 255)
 
+        # --- Threading ---
+        self._update_queue = queue.Queue()
+        self._display_thread = threading.Thread(target=self._run_display, daemon=True)
+        self._display_thread.start()
+
         if backlight:
             backlight.sn3218.enable()
             backlight.rgb(0, 0, 255)
@@ -31,6 +39,31 @@ class DisplayHandler:
         else:
             logging.warning("⚠️  No backlight driver found")
 
+    def _run_display(self):
+        """Background thread to refresh text asynchronously."""
+        buffer = ""
+        while True:
+            try:
+                # Wait a bit for new text, otherwise keep showing last
+                text = self._update_queue.get(timeout=0.1)
+                if text is None:
+                    break
+                buffer = text[-32:]  # keep last 32 chars
+                self.lcd.clear()
+                self.lcd.write(buffer)
+            except queue.Empty:
+                continue
+
+    def async_write(self, text: str):
+        """Queue text for background display."""
+        if text is not None:
+            self._update_queue.put(str(text))
+
+    def stop_display_thread(self):
+        """Stop background display loop."""
+        self._update_queue.put(None)
+
+ 
     # === LCD Methods ===
     def clear(self):
         self.lcd.clear()

@@ -141,7 +141,7 @@ def stream_and_speak(conversation, llm, tmp_audio_dir, prefix="response", temper
         display_buffer += content
         # Keep only last 32 chars (2×16 LCD)
         truncated = display_buffer[-32:]
-        display.write(truncated)
+        display.async_write(truncated)
 
         buffer += content
         full_response_parts.append(content)
