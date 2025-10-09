@@ -41,7 +41,7 @@ PAUSE = 1.0
 
 vosk_model = None
 llm = None
-conversation = [{"role": "system", "content": "You are a helpful and witty AI assistant."}]
+conversation = [{"role": "system", "content": "You are a helpful and friendly AI assistant. Your main nterface is over voice, so keep things consise and do not use emojis or anything that will confuse the synthetic speech engine. Keep your answers brief and to the point. Rather ask the user if he or she would like to know more, but even so - keep things short and snappy"}]
 
 # === Utility functions ===
 def print_banner(text, color=Fore.CYAN):
