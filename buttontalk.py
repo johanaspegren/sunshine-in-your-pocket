@@ -72,8 +72,9 @@ def init_models():
     if llm is None:
         print_banner("🤖 Initialising LLM handler...", Fore.MAGENTA)
         display.write("LLM Init - openai")
-        llm = LLMHandler(provider="openai", model="gpt-4o-mini")
-        display.write("Ready")
+        #llm = LLMHandler(provider="openai", model="gpt-4o-mini")
+        llm = LLMHandler(provider="ollama", model="gemma3:1b")
+        display.write("Ready, using ollama")
 
 
 def transcribe_recording(wav_path: Path) -> str:
