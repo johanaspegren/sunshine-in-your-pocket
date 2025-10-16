@@ -22,8 +22,15 @@ from colorama import Fore, Style, init as color_init
 from piper_tts import synthesize_to_file
 from modules.llm_handler import LLMHandler
 from modules.display_handler import DisplayHandler
+import argparse
+
+from bench import bench
 
 # === Setup ===
+bench.start()  # background flusher
+
+sd.default.latency = ('low', 'low')  # ask nicely for small buffers
+
 color_init(autoreset=True)
 logging.basicConfig(
     level=logging.INFO,
@@ -36,7 +43,7 @@ TMP_AUDIO = PROJECT_ROOT / "tts_output"
 TMP_AUDIO.mkdir(parents=True, exist_ok=True)
 MODEL_PATH = str(PROJECT_ROOT / "models" / "vosk-model-small-en-us-0.15")
 SAMPLE_RATE = 16000
-BLOCK_SIZE = 8000
+BLOCK_SIZE = 2048
 PAUSE = 1.0
 
 vosk_model = None
@@ -50,6 +57,9 @@ def print_banner(text, color=Fore.CYAN):
 
 def speak(text: str, filename: str):
     """Convert text to speech and play."""
+    if os.getenv("TTS_MUTE") == "1":
+        logging.info(f"(TTS muted) {text}")
+        return  
     path = TMP_AUDIO / filename
     synthesize_to_file(text, path)
     logging.info(f"🔊 Speaking: {text}")
@@ -166,6 +176,7 @@ def stream_and_speak(conversation, llm, tmp_audio_dir, prefix="response", temper
 
 def handle_button_event():
     init_models()
+
     rec_file, duration = record_audio_while_pressed(button)
 
     if duration < 0.5:
@@ -195,21 +206,66 @@ def shutdown_handler(sig, frame):
 signal.signal(signal.SIGTERM, shutdown_handler)
 signal.signal(signal.SIGINT, shutdown_handler)
 
+pin_factory = None
+button = None
+display = None
+
+def ensure_display():
+    global display
+    if display is None:
+        from modules.display_handler import DisplayHandler
+        # if you want a headless fallback, detect and create a NullDisplay here
+        display = DisplayHandler()
+    return display
+
+def ensure_button():
+    global button, pin_factory
+    if button is None:
+        from gpiozero.pins.lgpio import LGPIOFactory
+        from gpiozero import Button
+        pin_factory = LGPIOFactory()
+        button = Button(5, pull_up=True, pin_factory=pin_factory)
+    return button
+
+
+llm = None 
+vosk_model = None
+MODEL_PATH = str(PROJECT_ROOT / "models" / "vosk-model-small-en-us-0.15")
+
+def ensure_vosk_model():
+    global vosk_model
+    if vosk_model is None:
+        print_banner("🧠 Loading Vosk model...", Fore.YELLOW)
+        vosk_model = Model(MODEL_PATH)
+    return vosk_model
+
+def ensure_llm():
+    global llm
+    if llm is None:
+        d = ensure_display()
+        print_banner("🤖 Initialising LLM handler...", Fore.MAGENTA)
+        d.write("Init LLM (Ollama)")
+        llm = LLMHandler(provider="ollama", model="gemma3:1b")
+        d.write("Ready (Ollama)")
+    return llm
+
+def init_models():
+    ensure_display()
+    ensure_vosk_model()
+    ensure_llm()
+
 
 def main():
+    d = ensure_display()
+    b = ensure_button()
     print_banner("🚀 Starting Buttontalk Assistant", Fore.GREEN)
-    display.fade_in(color=(0, 100, 255))
-    display.write("Hello")
+    d.fade_in(color=(0, 100, 255))
+    d.write("Hello")
     speak("Hello! I'm online and ready to hang out.", "online.wav")
-    button.when_pressed = handle_button_event
+    b.when_pressed = handle_button_event
     print(Fore.CYAN + "📲 Tap or hold the button to talk.\n" + Style.RESET_ALL)
     pause()
 
-
-# === Hardware init ===
-pin_factory = LGPIOFactory()
-button = Button(5, pull_up=True, pin_factory=pin_factory)
-display = DisplayHandler()
-
 if __name__ == "__main__":
     main()
+
